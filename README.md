@@ -4,6 +4,30 @@ This is the `bootstrap-webui` idea shaped into a CLEO Lua authoring app.
 
 ![CLEO Lua Editor showing the Ace editor, autocomplete vocabulary, and opcode dictionary panels.](docs/screenshots/editor-main.svg)
 
+# CLEO Lua Editor
+
+CLEO Lua Editor is a small Linux-friendly editor/toolchain for writing CLEO scripts for the Grand Theft Auto 3d-series games, with a Lua-flavored helper layer. (I targeted GTA:LCS for the PSP/PPSSPP specifically, but what opcodes.dict you use is interchangeable so it could be adapted to SA or VC without too much work also.)
+
+Instead of hand-writing every raw opcode line, you can write scripts in a more readable Lua-style format, use Ace autocomplete from a loaded opcode dictionary, catch Lua syntax errors in the editor, then compile the result into `.csi` bytecode with the included Python compiler.
+
+The project is meant to be lightweight, local-first, and hackable: no Windows-only Sanny Builder dependency, no giant IDE requirement, and no online service needed for normal editing.
+
+## What it does
+
+* Provides an Ace-based editor for CLEO-Lua source files.
+* Loads an opcode dictionary and uses it for autocomplete.
+* Offers small helper functions for common CLEO patterns like labels, jumps, locals, and raw opcode calls.
+* Generates old-style CLEO text from the Lua layer.
+* Compiles that generated text into `.csi` bytecode using the Python compiler.
+* Runs as a local GTK/WebKit desktop app.
+
+## Why this matters
+
+The central experiment here is not just a nice editor shell: this project can compile CLEO scripts outside of Sanny Builder.
+
+The current workflow is still split into two parts: write/edit in the GTK/WebKit Ace UI, then run the standalone compiler from the command line. The compiler path is real and produces `.csi` output. A GUI **Compile** button is future wiring, not the missing core feature.
+
+
 ## Why this matters
 
 The central experiment here is not just a nice editor shell: this project can compile CLEO script outside of Sanny Builder. The current workflow is still split in two parts — write/edit in the GTK/WebKit Ace UI, then run the standalone compiler from the command line — but the compiler path is real and produces `.csi` output. A GUI "Compile" button is future wiring, not the missing core feature.
