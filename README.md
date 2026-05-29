@@ -23,14 +23,7 @@ The project is meant to be lightweight, local-first, and hackable: no Windows-on
 
 ## Why this matters
 
-The central experiment here is not just a nice editor shell: this project can compile CLEO scripts outside of Sanny Builder.
-
-The current workflow is still split into two parts: write/edit in the GTK/WebKit Ace UI, then run the standalone compiler from the command line. The compiler path is real and produces `.csi` output. A GUI **Compile** button is future wiring, not the missing core feature.
-
-
-## Why this matters
-
-The central experiment here is not just a nice editor shell: this project can compile CLEO script outside of Sanny Builder. The current workflow is still split in two parts — write/edit in the GTK/WebKit Ace UI, then run the standalone compiler from the command line — but the compiler path is real and produces `.csi` output. A GUI "Compile" button is future wiring, not the missing core feature.
+The central experiment here is not just a nice editor shell: this project can compile CLEO script outside of Sanny Builder. The current workflow is still split in two parts — write/edit in the GTK/WebKit Ace UI, then run the standalone compiler from the command line — but the compiler path is real and produces `.csi` output, just not wired to the GUI yet.
 
 ## Project tour
 
