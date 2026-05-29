@@ -1,0 +1,74 @@
+{
+  "WAIT_TIME_INT": {
+    "opcode": "0001",
+    "var_count": 1
+  },
+  "IF": {
+    "opcode": "00D6",
+    "var_count": 1
+  },
+  "GOTO_@LABEL": {
+    "opcode": "0002",
+    "var_count": 1
+  },
+  "GOTO_IF_FALSE_@LABEL": {
+    "opcode": "004D",
+    "var_count": 1
+  },
+  "GOSUB_@LABEL": {
+    "opcode": "0050",
+    "var_count": 1
+  },
+  "RETURN": {
+    "opcode": "0051",
+    "var_count": 0
+  },
+  "GET_PLAYER_CHAR": {
+    "opcode": "01F5",
+    "var_count": 2
+  },
+  "IS_BUTTON_PRESSED": {
+    "opcode": "00E1",
+    "var_count": 2
+  },
+  "PRINT_HELP": {
+    "opcode": "0512",
+    "var_count": 1
+  },
+  "PRINT_WITH_NUMBER": {
+    "opcode": "01E3",
+    "var_count": 4
+  },
+  "GET_OFFSET_FROM_CHAR_IN_WORLD_COORDS": {
+    "opcode": "04C4",
+    "var_count": 7
+  },
+  "LOCAL_VAR_INT_>_LITERAL_INT": {
+    "opcode": "0019",
+    "var_count": 2
+  },
+  "LOCAL_VAR_INT_-=_LITERAL_INT": {
+    "opcode": "000E",
+    "var_count": 2
+  },
+  "LOCAL_VAR_INT_=_LITERAL_INT": {
+    "opcode": "0006",
+    "var_count": 2
+  },
+  "LOCAL_VAR_INT_=#_LOCAL_VAR_FLOAT": {
+    "opcode": "008C",
+    "var_count": 2
+  },
+  "SET_PLAYER_CONTROL": {
+    "opcode": "01B9",
+    "var_count": 2
+  },
+  "GET_CLOSEST_CAR_NODE": {
+    "opcode": "02C6",
+    "var_count": 6
+  },
+  "TELEPORT_PLAYER_TO_COORDS": {
+    "opcode": "0055",
+    "var_count": 4
+  }
+}

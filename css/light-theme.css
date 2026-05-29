@@ -1,0 +1,103 @@
+body {
+    background-color: #fff;
+    color: #000;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    color-scheme: light;
+}
+
+.modal-dialog .modal-content {
+    background-color: #fff;
+    color: #000;
+}
+
+.row {
+    position: fixed;
+    left:5px;
+    top:0px;
+    display: flex;
+    flex-direction: row;
+    gap: 30px;
+    padding-top: 3px;
+    height: 30px;
+    width: 100%;
+    background-color: white;
+}
+
+.row > li {
+    list-style: none;
+}
+
+.row > li > a {
+    color: #000;
+    text-decoration: none;
+}
+
+.row > li > a:hover {
+    background-color: #eee;
+}
+
+.ui-menu {
+    display: block;
+    position: fixed;
+    background: #fff;
+    border: 1px solid #ccc;
+    z-index: 1000;
+    color-scheme: light;
+    color: #000;
+    background-color: #fff;
+    border: none;
+}
+
+.nav-item > a {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow: hidden !important;
+    white-space: nowrap !important;
+}
+
+.navbar-nav {
+    background-color: #fff;
+    padding-left: 3px;
+    height: 30px;
+    position: fixed;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    width: 100% !important;
+    top: 10px;
+    left: 10px;
+    flex-direction: row;
+    flex-wrap: nowrap;
+}
+
+.navbar-nav > li {
+    list-style: none;
+}
+
+.navbar-nav > li > a {
+    color: #000;
+    padding: 0px 6px;
+    border-radius: 0;
+    text-decoration: none;
+    background-color: #fff;
+}
+
+.navbar-nav > li > a:hover {
+    background-color: #eee;
+}
+
+.navbar-inverse {
+    background-color: #fff;
+}
+
+.dropdown-menu {
+    background-color: #fff;
+}
+
+.dropdown-menu > li > a {
+    background-color: #fff;
+    color: #000;
+}
+
+.container {
+    padding: 5px;
+}

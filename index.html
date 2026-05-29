@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>CLEO Lua Editor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Keep bootstrap-webui's local asset convention. -->
+  <link rel="stylesheet" href="css/bootstrap.css">
+  <link rel="stylesheet" href="css/my.css">
+
+  <script src="js/jquery.js"></script>
+  <script src="js/bootstrap.js"></script>
+
+  <!-- Put Ace files in js/ace/. See js/ace/README.put_ace_here.txt. -->
+  <script src="js/ace/ace.js"></script>
+  <script src="js/ace/ext-language_tools.js"></script>
+  <script src="js/ace/mode-lua.js"></script>
+  <script src="js/ace/theme-monokai.js"></script>
+  <script src="js/ace/theme-chrome.js"></script>
+
+  <style>
+    :root {
+      --bg: #16181d;
+      --panel: #20232b;
+      --panel2: #262a34;
+      --fg: #edf1f7;
+      --muted: #9aa3b2;
+      --line: #3a4050;
+      --accent: #7cb7ff;
+      --warn: #ffd166;
+      --bad: #ff6b6b;
+      --good: #7ee787;
+    }
+
+    body.light {
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --panel2: #eef1f7;
+      --fg: #141822;
+      --muted: #596274;
+      --line: #ccd3df;
+      --accent: #2457d6;
+      --warn: #8a6200;
+      --bad: #b42318;
+      --good: #167245;
+    }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    a, a:hover { color: var(--fg); }
+
+    .app {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      height: 100%;
+      min-height: 0;
+    }
+
+    .topbar {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+      padding: 0.45rem 0.7rem;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      user-select: none;
+      white-space: nowrap;
+    }
+
+    .brand {
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      margin-right: 0.5rem;
+    }
+
+    .topbar button, .topbar label.buttonish, .topbar select {
+      border: 1px solid var(--line);
+      background: var(--panel2);
+      color: var(--fg);
+      border-radius: 0.4rem;
+      padding: 0.35rem 0.55rem;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+
+    .topbar button:hover, .topbar label.buttonish:hover {
+      border-color: var(--accent);
+    }
+
+    .topbar input[type="file"] {
+      display: none;
+    }
+
+    .spacer {
+      flex: 1;
+    }
+
+    .main {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      background: var(--bg);
+    }
+
+    #editor {
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      font-size: 14px;
+    }
+
+    .side {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr 1fr;
+      border-left: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .side-section {
+      min-height: 0;
+      border-bottom: 1px solid var(--line);
+      padding: 0.7rem;
+      overflow: auto;
+    }
+
+    .side-section h3 {
+      font-size: 0.95rem;
+      margin: 0 0 0.45rem 0;
+      color: var(--fg);
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.3;
+    }
+
+    .pillrow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 0.55rem;
+    }
+
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 0.2rem 0.45rem;
+      background: var(--panel2);
+      color: var(--fg);
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+
+    .pill:hover {
+      border-color: var(--accent);
+    }
+
+    .statusbar {
+      display: grid;
+      grid-template-columns: 1fr auto auto auto;
+      gap: 0.8rem;
+      align-items: center;
+      padding: 0.35rem 0.7rem;
+      background: var(--panel);
+      border-top: 1px solid var(--line);
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+
+    .status-good { color: var(--good); }
+    .status-warn { color: var(--warn); }
+    .status-bad { color: var(--bad); }
+
+    #lintOutput, #dictOutput {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: 0.78rem;
+      white-space: pre-wrap;
+      line-height: 1.35;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 900px) {
+      .main {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr 260px;
+      }
+      .side {
+        grid-template-columns: 1fr 1fr 1fr;
+        grid-template-rows: 1fr;
+        border-left: 0;
+        border-top: 1px solid var(--line);
+      }
+      .side-section {
+        border-right: 1px solid var(--line);
+        border-bottom: 0;
+      }
+    }
+  </style>
+</head>
+
+<body>
+<div class="app">
+  <div class="topbar">
+    <span class="brand">CLEO Lua Editor</span>
+
+    <button id="newBtn">New</button>
+
+    <label class="buttonish" for="openLuaInput">Open .lua</label>
+    <input id="openLuaInput" type="file" accept=".lua,.txt,text/plain">
+
+    <button id="saveLuaBtn">Save .lua</button>
+    <button id="saveProjectBtn">Export Project</button>
+
+    <label class="buttonish" for="opcodeInput">Load opcodes.dict</label>
+    <input id="opcodeInput" type="file" accept=".json,.txt,application/json,text/plain">
+
+    <button id="lintBtn">Check Names</button>
+    <button id="templateBtn">Insert Template</button>
+    <button id="backendBtn">Test Backend</button>
+
+    <span class="spacer"></span>
+
+    <select id="themeSelect" title="Editor theme">
+      <option value="ace/theme/monokai">Monokai</option>
+      <option value="ace/theme/chrome">Chrome</option>
+    </select>
+    <button id="lightBtn">🌙</button>
+  </div>
+
+  <div class="main">
+    <div id="editor"></div>
+
+    <aside class="side">
+      <section class="side-section">
+        <h3>Autocomplete vocabulary</h3>
+        <div class="small">
+          Suggestions combine Lua helpers plus whatever opcode dictionary is loaded.
+          Legal Lua opcode names insert as <code>NAME(...)</code>. Weird names insert as <code>OP("NAME", ...)</code>.
+        </div>
+        <div class="pillrow" id="helperPills"></div>
+      </section>
+
+      <section class="side-section">
+        <h3>Dictionary</h3>
+        <div id="dictOutput">No dictionary loaded yet.</div>
+      </section>
+
+      <section class="side-section">
+        <h3>Lightweight checks</h3>
+        <div id="lintOutput">Click “Check Names” to scan uppercase calls and OP("...") names against the loaded dictionary.</div>
+      </section>
+    </aside>
+  </div>
+
+  <div class="statusbar">
+    <span id="status">Loading editor...</span>
+    <span id="cursorStatus">Ln 1, Col 1</span>
+    <span id="dictStatus">0 opcodes</span>
+    <span id="saveStatus">autosave idle</span>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+const DEFAULT_SOURCE = `-- CLEO Lua frontend script.
+-- Save this as .lua, then run:
+-- python3 compiler_with_lua.py script.lua opcodes.dict.txt
+
+thread('SCRIPT')
+
+label('loop')
+wait(0)
+
+IF(1)
+IS_BUTTON_PRESSED(0, 4)
+goto_false('s8')
+
+IF(1)
+IS_BUTTON_PRESSED(0, 10)
+goto_false('s8')
+
+PRINT_HELP('TSAVE')
+seti(V(2), 300)
+gosub('get_position')
+
+label('s8')
+jmp('loop')
+
+label('get_position')
+GET_PLAYER_CHAR(V(0), V(1))
+GET_OFFSET_FROM_CHAR_IN_WORLD_COORDS(V(1), 0.0, 0.0, 0.0, V(3), V(4), V(5))
+int_from_float(V(6), V(3))
+int_from_float(V(7), V(4))
+int_from_float(V(8), V(5))
+PRINT_WITH_NUMBER('ONEX', V(6), 1000, 0)
+ret()
+`;
+
+const DEFAULT_OPCODE_DICT = {
+  "WAIT_TIME_INT": {"opcode": "0001", "var_count": 1},
+  "IF": {"opcode": "00D6", "var_count": 1},
+  "GOTO_@LABEL": {"opcode": "0002", "var_count": 1},
+  "GOTO_IF_FALSE_@LABEL": {"opcode": "004D", "var_count": 1},
+  "GOSUB_@LABEL": {"opcode": "0050", "var_count": 1},
+  "RETURN": {"opcode": "0051", "var_count": 0},
+  "GET_PLAYER_CHAR": {"opcode": "01F5", "var_count": 2},
+  "IS_BUTTON_PRESSED": {"opcode": "00E1", "var_count": 2},
+  "PRINT_HELP": {"opcode": "0512", "var_count": 1},
+  "PRINT_WITH_NUMBER": {"opcode": "01E3", "var_count": 4},
+  "GET_OFFSET_FROM_CHAR_IN_WORLD_COORDS": {"opcode": "04C4", "var_count": 7},
+  "LOCAL_VAR_INT_>_LITERAL_INT": {"opcode": "0019", "var_count": 2},
+  "LOCAL_VAR_INT_-=_LITERAL_INT": {"opcode": "000E", "var_count": 2},
+  "LOCAL_VAR_INT_=_LITERAL_INT": {"opcode": "0006", "var_count": 2},
+  "LOCAL_VAR_INT_=#_LOCAL_VAR_FLOAT": {"opcode": "008C", "var_count": 2},
+  "SET_PLAYER_CONTROL": {"opcode": "01B9", "var_count": 2},
+  "GET_CLOSEST_CAR_NODE": {"opcode": "02C6", "var_count": 6},
+  "TELEPORT_PLAYER_TO_COORDS": {"opcode": "0055", "var_count": 4}
+};
+
+const LUA_RESERVED = new Set([
+  "and", "break", "do", "else", "elseif", "end", "false", "for", "function",
+  "goto", "if", "in", "local", "nil", "not", "or", "repeat", "return",
+  "then", "true", "until", "while"
+]);
+
+const HELPERS = [
+  {caption: "thread", snippet: "thread('${1:SCRIPT}')", meta: "CLEO helper"},
+  {caption: "label", snippet: "label('${1:name}')", meta: "CLEO helper"},
+  {caption: "label_data", snippet: "label('${1:name}', '${2:data}')", meta: "CLEO helper"},
+  {caption: "jmp", snippet: "jmp('${1:label}')", meta: "GOTO_@LABEL"},
+  {caption: "goto_false", snippet: "goto_false('${1:label}')", meta: "GOTO_IF_FALSE_@LABEL"},
+  {caption: "gosub", snippet: "gosub('${1:label}')", meta: "GOSUB_@LABEL"},
+  {caption: "ret", snippet: "ret()", meta: "RETURN"},
+  {caption: "wait", snippet: "wait(${1:0})", meta: "WAIT_TIME_INT"},
+  {caption: "V", snippet: "V(${1:0})", meta: "local var n@"},
+  {caption: "G", snippet: "G(${1:500})", meta: "global var $n"},
+  {caption: "L", snippet: "L('${1:label}')", meta: "@label operand"},
+  {caption: "OP", snippet: "OP('${1:OPCODE}', ${2:args})", meta: "raw opcode call"},
+  {caption: "seti", snippet: "seti(V(${1:0}), ${2:0})", meta: "int = literal"},
+  {caption: "dec", snippet: "dec(V(${1:0}), ${2:1})", meta: "int -= literal"},
+  {caption: "gt", snippet: "gt(V(${1:0}), ${2:0})", meta: "int > literal"},
+  {caption: "int_from_float", snippet: "int_from_float(V(${1:0}), V(${2:1}))", meta: "int =# float"}
+];
+
+let editor;
+let opcodeDict = {};
+let opcodeCompletions = [];
+let filename = "script.lua";
+let autosaveTimer = null;
+
+function $(id) {
+  return document.getElementById(id);
+}
+
+function setStatus(text, cls) {
+  const node = $("status");
+  node.className = cls || "";
+  node.textContent = text;
+}
+
+window.CLEO_UI_STATUS = function(text) {
+  setStatus(text, "status-good");
+};
+
+function isValidLuaIdentifier(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !LUA_RESERVED.has(name);
+}
+
+function sanitizeSnippetText(text) {
+  return String(text || "arg")
+    .replace(/[{}$\\]/g, "")
+    .replace(/[,\n\r\t]/g, " ")
+    .slice(0, 24) || "arg";
+}
+
+function paramHint(info, index) {
+  const params = Array.isArray(info.params) ? info.params : [];
+  const p = params[index] || {};
+  return sanitizeSnippetText(p.name || p.label || p.type || `arg${index + 1}`);
+}
+
+function opcodeParamCount(info) {
+  if (!info || typeof info !== "object") return 0;
+  if (Number.isInteger(info.var_count)) return info.var_count;
+  if (Number.isInteger(info.param_count)) return info.param_count;
+  if (Array.isArray(info.params)) return info.params.length;
+  return 0;
+}
+
+function makeOpcodeSnippet(name, info) {
+  const count = opcodeParamCount(info);
+  const args = [];
+  for (let i = 0; i < count; i++) {
+    args.push("${" + (i + 1) + ":" + paramHint(info, i) + "}");
+  }
+
+  if (isValidLuaIdentifier(name)) {
+    return `${name}(${args.join(", ")})`;
+  }
+
+  if (args.length) {
+    return `OP("${name}", ${args.join(", ")})`;
+  }
+  return `OP("${name}")`;
+}
+
+function normalizeDict(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  const source = raw.opcodes && typeof raw.opcodes === "object" ? raw.opcodes : raw;
+  const out = {};
+  for (const [key, value] of Object.entries(source)) {
+    const name = String(key).trim().toUpperCase();
+    if (!name) continue;
+    out[name] = value || {};
+  }
+  return out;
+}
+
+function buildOpcodeCompletions() {
+  opcodeCompletions = Object.entries(opcodeDict).map(([name, info]) => {
+    const opcode = info && info.opcode ? String(info.opcode).toUpperCase() : "????";
+    const count = opcodeParamCount(info);
+    return {
+      caption: name,
+      snippet: makeOpcodeSnippet(name, info),
+      meta: `${opcode} · ${count} params`,
+      score: 900
+    };
+  });
+
+  $("dictStatus").textContent = `${opcodeCompletions.length} opcodes`;
+  $("dictOutput").textContent = opcodeCompletions.length
+    ? `Loaded ${opcodeCompletions.length} opcodes.\n\n` +
+      Object.entries(opcodeDict).slice(0, 18).map(([name, info]) => {
+        return `${name.padEnd(36, " ")} ${String(info.opcode || "????").toUpperCase()}  ${opcodeParamCount(info)} params`;
+      }).join("\n") +
+      (opcodeCompletions.length > 18 ? "\n..." : "")
+    : "No dictionary loaded.";
+}
+
+function loadDict(raw, sourceName) {
+  opcodeDict = normalizeDict(raw);
+  buildOpcodeCompletions();
+  localStorage.setItem("cleoLuaEditor.opcodeDict", JSON.stringify(opcodeDict));
+  setStatus(`Loaded opcode dictionary from ${sourceName || "memory"}`, "status-good");
+}
+
+function initAce() {
+  if (!window.ace) {
+    setStatus("Ace not found. Put ace.js in js/ace/ or use the plain HTML in a browser with Ace available.", "status-bad");
+    return;
+  }
+
+  const langTools = ace.require("ace/ext/language_tools");
+
+  editor = ace.edit("editor");
+  editor.setTheme("ace/theme/monokai");
+  editor.session.setMode("ace/mode/lua");
+  editor.session.setUseSoftTabs(true);
+  editor.session.setTabSize(4);
+  editor.setOptions({
+    fontSize: "14px",
+    showPrintMargin: false,
+    enableBasicAutocompletion: true,
+    enableLiveAutocompletion: true,
+    enableSnippets: true,
+    wrap: true
+  });
+
+  const saved = localStorage.getItem("cleoLuaEditor.source");
+  editor.setValue(saved || DEFAULT_SOURCE, -1);
+
+  editor.commands.addCommand({
+    name: "saveLua",
+    bindKey: {win: "Ctrl-S", mac: "Command-S"},
+    exec: saveLua
+  });
+
+  editor.commands.addCommand({
+    name: "checkNames",
+    bindKey: {win: "Ctrl-Enter", mac: "Command-Enter"},
+    exec: lintSource
+  });
+
+  const cleoCompleter = {
+    getCompletions: function(ed, session, pos, prefix, callback) {
+      const helperCompletions = HELPERS.map(h => ({
+        caption: h.caption,
+        snippet: h.snippet,
+        meta: h.meta,
+        score: 1000
+      }));
+      callback(null, helperCompletions.concat(opcodeCompletions));
+    }
+  };
+
+  langTools.addCompleter(cleoCompleter);
+
+  editor.selection.on("changeCursor", updateCursor);
+  editor.session.on("change", () => {
+    scheduleAutosave();
+    updateCursor();
+  });
+
+  updateCursor();
+  renderHelperPills();
+  setStatus("Editor ready", "status-good");
+}
+
+function renderHelperPills() {
+  const box = $("helperPills");
+  box.innerHTML = "";
+  HELPERS.forEach(h => {
+    const pill = document.createElement("span");
+    pill.className = "pill";
+    pill.textContent = h.caption;
+    pill.title = h.meta;
+    pill.onclick = () => {
+      editor.insert(h.snippet.replace(/\$\{\d+:([^}]+)\}/g, "$1"));
+      editor.focus();
+    };
+    box.appendChild(pill);
+  });
+}
+
+function updateCursor() {
+  if (!editor) return;
+  const pos = editor.getCursorPosition();
+  $("cursorStatus").textContent = `Ln ${pos.row + 1}, Col ${pos.column + 1}`;
+}
+
+function scheduleAutosave() {
+  $("saveStatus").textContent = "autosave pending";
+  if (autosaveTimer) clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    localStorage.setItem("cleoLuaEditor.source", editor.getValue());
+    localStorage.setItem("cleoLuaEditor.filename", filename);
+    $("saveStatus").textContent = "autosaved";
+  }, 350);
+}
+
+function downloadText(name, text, mime) {
+  const blob = new Blob([text], {type: mime || "text/plain;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function saveText(name, text, mime) {
+  // In a normal browser tab, Blob downloads are fine. In WebKitGTK, the
+  // auto-click download path can silently go nowhere unless the wrapper
+  // handles downloads. Prefer the local Flask endpoint when it exists.
+  try {
+    const response = await fetch("/api/save_text", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({filename: name, text})
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) throw new Error(result.error || response.statusText);
+    return result;
+  } catch (err) {
+    console.warn("Backend save failed; falling back to Blob download:", err);
+    downloadText(name, text, mime);
+    return {ok: true, relative_path: name, fallback_download: true};
+  }
+}
+
+async function saveLua() {
+  const outName = filename || "script.lua";
+  const result = await saveText(outName, editor.getValue(), "text/x-lua;charset=utf-8");
+  if (result.fallback_download) {
+    setStatus(`Requested browser download: ${outName}`, "status-good");
+  } else {
+    setStatus(`Saved ${result.relative_path}`, "status-good");
+  }
+}
+
+async function saveProject() {
+  const project = {
+    type: "cleo-lua-editor-project",
+    version: 1,
+    filename,
+    saved_at: new Date().toISOString(),
+    source: editor.getValue(),
+    opcodes: opcodeDict
+  };
+  const outName = (filename || "script.lua").replace(/\.(lua|txt)$/i, "") + ".cleo-lua-project.json";
+  const result = await saveText(outName, JSON.stringify(project, null, 2), "application/json;charset=utf-8");
+  if (result.fallback_download) {
+    setStatus(`Requested browser download: ${outName}`, "status-good");
+  } else {
+    setStatus(`Saved ${result.relative_path}`, "status-good");
+  }
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.readAsText(file);
+  });
+}
+
+async function openLuaFile(evt) {
+  const file = evt.target.files[0];
+  if (!file) return;
+  const text = await readFileAsText(file);
+  filename = file.name;
+  editor.setValue(text, -1);
+  localStorage.setItem("cleoLuaEditor.filename", filename);
+  setStatus(`Opened ${filename}`, "status-good");
+  evt.target.value = "";
+}
+
+async function openOpcodeFile(evt) {
+  const file = evt.target.files[0];
+  if (!file) return;
+  try {
+    const text = await readFileAsText(file);
+    loadDict(JSON.parse(text), file.name);
+  } catch (err) {
+    setStatus(`Opcode dict load failed: ${err.message}`, "status-bad");
+  } finally {
+    evt.target.value = "";
+  }
+}
+
+function lintSource() {
+  const src = editor.getValue();
+  const warnings = [];
+  const seen = new Set();
+
+  const helperNames = new Set(HELPERS.map(h => h.caption.toUpperCase()));
+
+  const callRe = /\b([A-Z][A-Z0-9_]*)\s*\(/g;
+  let m;
+  while ((m = callRe.exec(src))) {
+    const name = m[1].toUpperCase();
+
+    // V(...), G(...), L(...), OP(...), etc. are Lua frontend helpers,
+    // not opcode dictionary calls. Do not report them as unknown opcodes.
+    if (helperNames.has(name)) continue;
+
+    if (!opcodeDict[name] && !seen.has(name)) {
+      warnings.push(`Unknown uppercase call: ${name}`);
+      seen.add(name);
+    }
+  }
+
+  const opRe = /\bOP\s*\(\s*["']([^"']+)["']/g;
+  while ((m = opRe.exec(src))) {
+    const name = m[1].toUpperCase();
+    if (!opcodeDict[name] && !seen.has(name)) {
+      warnings.push(`Unknown OP("...") name: ${name}`);
+      seen.add(name);
+    }
+  }
+
+  if (!Object.keys(opcodeDict).length) {
+    warnings.unshift("No full opcode dictionary loaded. Checks are only using the small built-in sample.");
+  }
+
+  $("lintOutput").textContent = warnings.length
+    ? warnings.join("\n")
+    : "No unknown opcode names found in uppercase calls or OP(\"...\") calls.";
+
+  setStatus(warnings.length ? `Check complete: ${warnings.length} warning(s)` : "Check complete: clean", warnings.length ? "status-warn" : "status-good");
+}
+
+function insertTemplate() {
+  editor.insert(`
+
+label('new_block')
+IF(1)
+IS_BUTTON_PRESSED(0, ${1})
+goto_false('after_new_block')
+
+PRINT_HELP('HELLO')
+
+label('after_new_block')
+`);
+  editor.focus();
+}
+
+function newFile() {
+  if (editor.getValue().trim() && !confirm("Replace the current editor buffer?")) return;
+  filename = "script.lua";
+  editor.setValue(DEFAULT_SOURCE, -1);
+  setStatus("New script buffer", "status-good");
+}
+
+function testBackend() {
+  fetch("/api/data", {
+    method: "POST",
+    body: JSON.stringify({event: "testing", at: new Date().toISOString()})
+  }).then(() => {
+    setStatus("Sent backend test", "status-good");
+  }).catch(err => {
+    setStatus(`Backend test failed: ${err.message}`, "status-bad");
+  });
+}
+
+function toggleLightMode() {
+  const light = document.body.classList.toggle("light");
+  $("lightBtn").textContent = light ? "🌞" : "🌙";
+  if (editor) {
+    editor.setTheme(light ? "ace/theme/chrome" : $("themeSelect").value);
+  }
+  localStorage.setItem("cleoLuaEditor.light", light ? "1" : "0");
+}
+
+function wireUi() {
+  $("newBtn").onclick = newFile;
+  $("openLuaInput").onchange = openLuaFile;
+  $("opcodeInput").onchange = openOpcodeFile;
+  $("saveLuaBtn").onclick = saveLua;
+  $("saveProjectBtn").onclick = saveProject;
+  $("lintBtn").onclick = lintSource;
+  $("templateBtn").onclick = insertTemplate;
+  $("backendBtn").onclick = testBackend;
+  $("lightBtn").onclick = toggleLightMode;
+
+  $("themeSelect").onchange = () => {
+    if (!document.body.classList.contains("light")) {
+      editor.setTheme($("themeSelect").value);
+    }
+  };
+
+  const savedName = localStorage.getItem("cleoLuaEditor.filename");
+  if (savedName) filename = savedName;
+
+  const savedDict = localStorage.getItem("cleoLuaEditor.opcodeDict");
+  if (savedDict) {
+    try {
+      loadDict(JSON.parse(savedDict), "localStorage");
+    } catch (err) {
+      loadDict(DEFAULT_OPCODE_DICT, "built-in sample");
+    }
+  } else {
+    loadDict(DEFAULT_OPCODE_DICT, "built-in sample");
+  }
+
+  if (localStorage.getItem("cleoLuaEditor.light") === "1") {
+    document.body.classList.add("light");
+    $("lightBtn").textContent = "🌞";
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  wireUi();
+  initAce();
+});
+</script>
+</body>
+</html>
