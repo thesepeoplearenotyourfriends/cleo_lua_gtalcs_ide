@@ -11,26 +11,39 @@ The editor itself still saves via browser Blob downloads, so there is no
 direct compiler pipeline hiding in the backend yet.
 """
 
+import hmac
 import json
 import os
-import re
+import secrets
 import sys
 import threading
 from pathlib import Path
+from urllib.parse import urlparse
 
 import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("WebKit2", "4.0")
 from gi.repository import Gtk, WebKit2, GLib
 
-from flask import Flask, request, send_from_directory, jsonify
+from flask import Flask, abort, jsonify, request, send_from_directory
+from werkzeug.utils import secure_filename
 
 
 BASE_DIR = Path(__file__).resolve().parent
 EXPORT_DIR = BASE_DIR / "exports"
 PORT = int(os.environ.get("CLEO_LUA_WEBUI_PORT", "5111"))
+APP_TOKEN = secrets.token_urlsafe(32)
+ALLOWED_ORIGINS = {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
+ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
+ALLOWED_NAV_HOSTS = {"127.0.0.1", "localhost"}
+ALLOWED_SAVE_EXTENSIONS = {".json", ".lua", ".txt"}
+MAX_REQUEST_BYTES = 2 * 1024 * 1024
+MAX_EVENT_BYTES = 16 * 1024
+MAX_SAVE_BYTES = 2 * 1024 * 1024
+DEV_MODE = "--dev" in sys.argv
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
 web_view = None
 
 
@@ -44,9 +57,87 @@ def run_js(js_source):
     GLib.idle_add(_run)
 
 
+def inject_app_token(html):
+    """Inject the per-run backend token into the served app page."""
+    token_script = (
+        "<script>"
+        f"window.APP_TOKEN = {json.dumps(APP_TOKEN)};"
+        f"window.APP_DEV_MODE = {json.dumps(DEV_MODE)};"
+        "</script>"
+    )
+    return html.replace("</head>", f"  {token_script}\n</head>", 1)
+
+
+def require_local_origin():
+    """Reject state-changing requests from non-local browser origins."""
+    origin = request.headers.get("Origin")
+    if origin and origin not in ALLOWED_ORIGINS:
+        abort(403)
+
+
+def require_token():
+    """Require the random per-run token for privileged backend routes."""
+    supplied = request.headers.get("X-App-Token", "")
+    if not hmac.compare_digest(supplied, APP_TOKEN):
+        abort(403)
+
+
+def require_json():
+    """Require JSON for action routes before reading request payloads."""
+    if not request.is_json:
+        abort(415)
+
+
+def require_content_length(max_bytes):
+    """Reject oversized requests before parsing their body."""
+    if request.content_length and request.content_length > max_bytes:
+        abort(413)
+
+
+def require_privileged_json_request():
+    require_local_origin()
+    require_token()
+    require_json()
+
+
+@app.before_request
+def reject_bad_host():
+    """Reject requests with unexpected Host headers."""
+    if request.host not in ALLOWED_HOSTS:
+        abort(403)
+
+
+@app.after_request
+def add_security_headers(resp):
+    """Apply browser-side defense-in-depth headers to all served content."""
+    resp.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' blob:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "worker-src 'self' blob:; "
+        "object-src 'none'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @app.route("/")
 def index():
-    return send_from_directory(BASE_DIR, "index.html")
+    return serve_index()
+
+
+@app.route("/index.html")
+def serve_index():
+    html = (BASE_DIR / "index.html").read_text(encoding="utf-8")
+    return inject_app_token(html)
 
 
 @app.route("/<path:filename>")
@@ -68,15 +159,12 @@ def data():
     if request.method == "GET":
         return jsonify({"message": "GET request received"})
 
-    raw = request.data.decode("utf-8", errors="replace")
-    print(f'flask received: "{raw}"')
+    require_privileged_json_request()
+    require_content_length(MAX_EVENT_BYTES)
+    payload = request.get_json() or {}
+    print(f"flask received event: {payload.get('event', '')}")
 
     # Keep this intentionally boring. It is a comms smoke-test, not a compiler.
-    try:
-        payload = json.loads(raw)
-    except Exception:
-        payload = {"event": raw}
-
     if payload.get("event") == "testing":
         run_js(
             """
@@ -89,12 +177,29 @@ def data():
 
 
 
-def safe_export_name(name, fallback="script.lua"):
-    """Return a safe leaf filename for app-managed exports."""
-    raw = str(name or fallback).strip()
-    raw = raw.replace("\\", "/").split("/")[-1]
-    raw = re.sub(r"[^A-Za-z0-9._ -]+", "_", raw).strip(" .")
-    return raw or fallback
+def safe_export_path(name, fallback="script.lua"):
+    """Return a contained path inside exports/ for app-managed writes."""
+    raw = str(name or fallback).replace("\\", "/").split("/")[-1]
+    filename = secure_filename(raw) or fallback
+    if filename in {".", ".."}:
+        abort(400)
+
+    suffix = Path(filename).suffix.lower()
+    if suffix not in ALLOWED_SAVE_EXTENSIONS:
+        abort(400)
+
+    base = EXPORT_DIR.resolve()
+    path = (base / filename).resolve()
+    if base != path and base not in path.parents:
+        abort(400)
+    return path
+
+
+def atomic_write_text(path, text):
+    """Write text via a same-directory temp file, then atomically replace."""
+    tmp_path = path.with_name(f"{path.name}.part")
+    tmp_path.write_text(text, encoding="utf-8")
+    os.replace(tmp_path, path)
 
 
 @app.route("/api/save_text", methods=["POST"])
@@ -105,17 +210,19 @@ def save_text():
     handling is wired up explicitly, so the desktop wrapper gets a boring
     local-save endpoint.
     """
-    try:
-        payload = request.get_json(force=True) or {}
-    except Exception:
-        return jsonify({"ok": False, "error": "Expected JSON body"}), 400
+    require_privileged_json_request()
+    require_content_length(MAX_SAVE_BYTES)
+    payload = request.get_json() or {}
 
-    filename = safe_export_name(payload.get("filename"))
+    out_path = safe_export_path(payload.get("filename"))
+    filename = out_path.name
     text = str(payload.get("text", ""))
+    text_bytes = len(text.encode("utf-8"))
+    if text_bytes > MAX_SAVE_BYTES:
+        abort(413)
 
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = EXPORT_DIR / filename
-    out_path.write_text(text, encoding="utf-8")
+    atomic_write_text(out_path, text)
 
     print(f"saved export: {out_path}")
     return jsonify({
@@ -123,7 +230,7 @@ def save_text():
         "filename": filename,
         "path": str(out_path),
         "relative_path": f"exports/{filename}",
-        "bytes": len(text.encode("utf-8")),
+        "bytes": text_bytes,
     })
 
 
@@ -132,7 +239,7 @@ def start_flask():
         use_reloader=False,
         host="127.0.0.1",
         port=PORT,
-        threaded=True,
+        threaded=False,
     )
 
 
@@ -153,13 +260,49 @@ def on_window_destroy(widget, data=None):
     os._exit(0)
 
 
+def on_context_menu(view, context_menu, event, hit_test_result):
+    """Disable the right-click context menu unless dev mode is requested."""
+    return not DEV_MODE
+
+
+def is_allowed_navigation(uri):
+    parsed = urlparse(uri)
+    if parsed.scheme == "http":
+        return parsed.hostname in ALLOWED_NAV_HOSTS and parsed.port == PORT
+    if parsed.scheme == "blob":
+        return uri.startswith(tuple(f"blob:{origin}" for origin in ALLOWED_ORIGINS))
+    if parsed.scheme == "about" and uri == "about:blank":
+        return True
+    return False
+
+
+def on_decide_policy(view, decision, decision_type):
+    """Keep the app window from navigating away from the local UI."""
+    if decision_type != WebKit2.PolicyDecisionType.NAVIGATION_ACTION:
+        return False
+
+    action = decision.get_navigation_action()
+    uri = action.get_request().get_uri()
+    if is_allowed_navigation(uri):
+        return False
+
+    print(f"BLOCKED NAVIGATION: {uri}")
+    decision.ignore()
+    return True
+
+
 def main():
     global web_view
 
     thread_flask = threading.Thread(target=start_flask, daemon=True)
     thread_flask.start()
 
-    window = Gtk.Window(title="CLEO Lua Editor")
+    window_title = (
+        "CLEO Lua Editor — DEV MODE, INSPECTOR ENABLED"
+        if DEV_MODE
+        else "CLEO Lua Editor"
+    )
+    window = Gtk.Window(title=window_title)
     window.set_default_size(1100, 720)
 
     local_cache_dir = BASE_DIR / ".cache"
@@ -172,12 +315,15 @@ def main():
     web_view = WebKit2.WebView.new_with_context(context)
 
     web_view.connect("load-changed", on_load_changed)
+    web_view.connect("context-menu", on_context_menu)
+    web_view.connect("decide-policy", on_decide_policy)
     window.connect("destroy", on_window_destroy)
 
     settings = web_view.get_settings()
     settings.set_property("enable-javascript", True)
-    settings.set_property("enable-developer-extras", True)
-    settings.set_property("enable_write_console_messages_to_stdout", True)
+    settings.set_property("enable-plugins", False)
+    settings.set_property("enable-developer-extras", DEV_MODE)
+    settings.set_property("enable_write_console_messages_to_stdout", DEV_MODE)
     settings.set_default_font_size(12)
 
     web_view.load_uri(f"http://127.0.0.1:{PORT}/index.html")

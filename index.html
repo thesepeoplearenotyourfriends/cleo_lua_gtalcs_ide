@@ -461,9 +461,14 @@ function loadDict(raw, sourceName) {
 
 function initAce() {
   if (!window.ace) {
-    setStatus("Ace not found. Put ace.js in js/ace/ or use the plain HTML in a browser with Ace available.", "status-bad");
+    setStatus("Ace not found. The bundled files should be present in js/ace/.", "status-bad");
     return;
   }
+
+  ace.config.set("basePath", "js/ace");
+  ace.config.set("modePath", "js/ace");
+  ace.config.set("themePath", "js/ace");
+  ace.config.set("workerPath", "js/ace");
 
   const langTools = ace.require("ace/ext/language_tools");
 
@@ -523,7 +528,7 @@ function initAce() {
 
 function renderHelperPills() {
   const box = $("helperPills");
-  box.innerHTML = "";
+  box.replaceChildren();
   HELPERS.forEach(h => {
     const pill = document.createElement("span");
     pill.className = "pill";
@@ -565,14 +570,22 @@ function downloadText(name, text, mime) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function appJsonHeaders() {
+  const headers = {"Content-Type": "application/json"};
+  if (window.APP_TOKEN) {
+    headers["X-App-Token"] = window.APP_TOKEN;
+  }
+  return headers;
+}
+
 async function saveText(name, text, mime) {
   // In a normal browser tab, Blob downloads are fine. In WebKitGTK, the
   // auto-click download path can silently go nowhere unless the wrapper
-  // handles downloads. Prefer the local Flask endpoint when it exists.
+  // handles downloads. Prefer the tokened local Flask endpoint when it exists.
   try {
     const response = await fetch("/api/save_text", {
       method: "POST",
-      headers: {"Content-Type": "application/json"},
+      headers: appJsonHeaders(),
       body: JSON.stringify({filename: name, text})
     });
     const result = await response.json();
@@ -713,8 +726,10 @@ function newFile() {
 function testBackend() {
   fetch("/api/data", {
     method: "POST",
+    headers: appJsonHeaders(),
     body: JSON.stringify({event: "testing", at: new Date().toISOString()})
-  }).then(() => {
+  }).then(response => {
+    if (!response.ok) throw new Error(response.statusText || `HTTP ${response.status}`);
     setStatus("Sent backend test", "status-good");
   }).catch(err => {
     setStatus(`Backend test failed: ${err.message}`, "status-bad");
