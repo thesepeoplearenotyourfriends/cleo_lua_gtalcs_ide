@@ -34,10 +34,16 @@ EXPORT_DIR = BASE_DIR / "exports"
 PORT = int(os.environ.get("CLEO_LUA_WEBUI_PORT", "5111"))
 APP_TOKEN = secrets.token_urlsafe(32)
 ALLOWED_ORIGINS = {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}"}
+ALLOWED_HOSTS = {f"127.0.0.1:{PORT}", f"localhost:{PORT}"}
 ALLOWED_NAV_HOSTS = {"127.0.0.1", "localhost"}
+ALLOWED_SAVE_EXTENSIONS = {".json", ".lua", ".txt"}
+MAX_REQUEST_BYTES = 2 * 1024 * 1024
+MAX_EVENT_BYTES = 16 * 1024
+MAX_SAVE_BYTES = 2 * 1024 * 1024
 DEV_MODE = "--dev" in sys.argv
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = MAX_REQUEST_BYTES
 web_view = None
 
 
@@ -56,6 +62,7 @@ def inject_app_token(html):
     token_script = (
         "<script>"
         f"window.APP_TOKEN = {json.dumps(APP_TOKEN)};"
+        f"window.APP_DEV_MODE = {json.dumps(DEV_MODE)};"
         "</script>"
     )
     return html.replace("</head>", f"  {token_script}\n</head>", 1)
@@ -81,10 +88,45 @@ def require_json():
         abort(415)
 
 
+def require_content_length(max_bytes):
+    """Reject oversized requests before parsing their body."""
+    if request.content_length and request.content_length > max_bytes:
+        abort(413)
+
+
 def require_privileged_json_request():
     require_local_origin()
     require_token()
     require_json()
+
+
+@app.before_request
+def reject_bad_host():
+    """Reject requests with unexpected Host headers."""
+    if request.host not in ALLOWED_HOSTS:
+        abort(403)
+
+
+@app.after_request
+def add_security_headers(resp):
+    """Apply browser-side defense-in-depth headers to all served content."""
+    resp.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' blob:; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: blob:; "
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "worker-src 'self' blob:; "
+        "object-src 'none'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'"
+    )
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 
 @app.route("/")
@@ -118,6 +160,7 @@ def data():
         return jsonify({"message": "GET request received"})
 
     require_privileged_json_request()
+    require_content_length(MAX_EVENT_BYTES)
     payload = request.get_json() or {}
     print(f"flask received event: {payload.get('event', '')}")
 
@@ -141,11 +184,22 @@ def safe_export_path(name, fallback="script.lua"):
     if filename in {".", ".."}:
         abort(400)
 
+    suffix = Path(filename).suffix.lower()
+    if suffix not in ALLOWED_SAVE_EXTENSIONS:
+        abort(400)
+
     base = EXPORT_DIR.resolve()
     path = (base / filename).resolve()
     if base != path and base not in path.parents:
         abort(400)
     return path
+
+
+def atomic_write_text(path, text):
+    """Write text via a same-directory temp file, then atomically replace."""
+    tmp_path = path.with_name(f"{path.name}.part")
+    tmp_path.write_text(text, encoding="utf-8")
+    os.replace(tmp_path, path)
 
 
 @app.route("/api/save_text", methods=["POST"])
@@ -157,14 +211,18 @@ def save_text():
     local-save endpoint.
     """
     require_privileged_json_request()
+    require_content_length(MAX_SAVE_BYTES)
     payload = request.get_json() or {}
 
     out_path = safe_export_path(payload.get("filename"))
     filename = out_path.name
     text = str(payload.get("text", ""))
+    text_bytes = len(text.encode("utf-8"))
+    if text_bytes > MAX_SAVE_BYTES:
+        abort(413)
 
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(text, encoding="utf-8")
+    atomic_write_text(out_path, text)
 
     print(f"saved export: {out_path}")
     return jsonify({
@@ -172,7 +230,7 @@ def save_text():
         "filename": filename,
         "path": str(out_path),
         "relative_path": f"exports/{filename}",
-        "bytes": len(text.encode("utf-8")),
+        "bytes": text_bytes,
     })
 
 
@@ -239,7 +297,12 @@ def main():
     thread_flask = threading.Thread(target=start_flask, daemon=True)
     thread_flask.start()
 
-    window = Gtk.Window(title="CLEO Lua Editor")
+    window_title = (
+        "CLEO Lua Editor — DEV MODE, INSPECTOR ENABLED"
+        if DEV_MODE
+        else "CLEO Lua Editor"
+    )
+    window = Gtk.Window(title=window_title)
     window.set_default_size(1100, 720)
 
     local_cache_dir = BASE_DIR / ".cache"

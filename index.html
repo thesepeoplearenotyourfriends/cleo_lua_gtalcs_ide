@@ -528,7 +528,7 @@ function initAce() {
 
 function renderHelperPills() {
   const box = $("helperPills");
-  box.innerHTML = "";
+  box.replaceChildren();
   HELPERS.forEach(h => {
     const pill = document.createElement("span");
     pill.className = "pill";
