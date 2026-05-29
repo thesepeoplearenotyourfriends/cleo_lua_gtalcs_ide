@@ -86,7 +86,7 @@ Refreshing Ace is optional and mostly a matter of user discretion. If you do wan
 python3 webkit-ui.py
 ```
 
-Or just open `index.html` in a browser tab if local Ace files are present.
+For normal use, prefer the wrapper. Opening `index.html` directly is only a static UI/development preview and does not use the intended backend trust boundary.
 
 ## Compile a script
 
@@ -96,6 +96,24 @@ python3 compiler_with_lua.py my_script.lua opcodes.dict.txt
 
 This command writes a generated CLEO-text file next to the Lua source and emits the compiled `.csi` next to the input script. The editor is currently the authoring surface, while the command-line compiler is the working compilation path.
 
+## Release/security posture
+
+This is a local desktop WebKit app with local filesystem/compiler capabilities. Treat the Flask backend as a private app backend for the bundled UI, not as a general-purpose web service.
+
+- Launch the app through the wrapper with `python3 webkit-ui.py`.
+- Do **not** open `index.html` directly in your everyday browser for normal use. The app is designed to run inside its local WebKit window, with a local backend and restricted navigation. Opening it in a normal browser mixes the app with browser extensions, cookies, tabs, download behavior, and other ambient web state.
+- The backend binds only to `127.0.0.1`; do not change it to `0.0.0.0` for a release build.
+- Privileged backend routes require a random per-run `X-App-Token`, reject non-JSON action requests, and only accept local origins.
+- File writes are resolved by Python and contained inside known app folders such as `exports/`; user-provided filenames are sanitized and cannot choose arbitrary absolute or parent paths.
+- The WebKit window blocks navigation away from the local app. Developer extras and the right-click context menu are disabled by default; use `python3 webkit-ui.py --dev` when you intentionally want inspector/debug behavior.
+- Do not add remote scripts/CDNs or load untrusted web pages into the app window. Ace is vendored locally under `js/ace/`.
+- Do not add a generic `/api/run` or pass user-provided strings to `shell=True`. Future compile/ADB actions should stay as narrow, tokened routes with known paths, explicit argument lists, timeouts, and returned stdout/stderr.
+
+A quick network-call audit before release is useful:
+
+```bash
+rg -n "https?://|wss?://|fetch\(|XMLHttpRequest|sendBeacon|new WebSocket|importScripts|createElement\(['\"]script" index.html js css
+```
 
 ## Saving files
 
@@ -108,5 +126,5 @@ exports/
 This is intentional. WebKitGTK may not show a normal browser "Save As" dialog for
 Blob downloads unless native download handling is wired into the wrapper, so the
 app uses a small Flask `/api/save_text` route and writes to a predictable local
-folder. If you open `index.html` in a regular browser without the Python wrapper,
-it falls back to the browser Blob download behavior.
+folder. If you open `index.html` directly as a static development preview,
+the backend token is unavailable and save actions fall back to browser Blob download behavior.
