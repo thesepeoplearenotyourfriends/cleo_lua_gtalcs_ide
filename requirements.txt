@@ -1,0 +1,4 @@
+# Python packages used by the desktop wrapper.
+# GTK/WebKit bindings also require system packages; see README.md.
+Flask>=3.0,<4
+PyGObject>=3.46
