@@ -96,7 +96,418 @@ python3 compiler_with_lua.py my_script.lua opcodes.dict.txt
 
 This command writes a generated CLEO-text file next to the Lua source and emits the compiled `.csi` next to the input script. The editor is currently the authoring surface, while the command-line compiler is the working compilation path.
 
-## Release/security posture
+
+## Saving files
+
+Inside the GTK/WebKit wrapper, **Save .lua** and **Export Project** write to:
+
+```text
+exports/
+```
+
+This is intentional. WebKitGTK may not show a normal browser "Save As" dialog for
+Blob downloads unless native download handling is wired into the wrapper, so the
+app uses a small Flask `/api/save_text` route and writes to a predictable local
+folder. If you open `index.html` directly as a static development preview,
+the backend token is unavailable and save actions fall back to browser Blob download behavior.
+
+## CLEO-Lua Syntax Primer
+
+This editor writes a small Lua-flavored layer that generates normal CLEO source for the compiler. The goal is not to replace CLEO opcodes; the goal is to make them easier to write, autocomplete, reuse, and organize.
+
+The pipeline is:
+
+```text
+.lua source
+→ Lua bridge expands helpers/opcodes
+→ generated CLEO text
+→ compiler emits .csi bytecode
+```
+
+### Minimal script shape
+
+A typical script starts with a thread name, labels, waits, opcode calls, and jumps:
+
+```lua
+thread("SCRIPT")
+
+label("loop")
+wait(0)
+
+PRINT_HELP("HELLO")
+
+jmp("loop")
+```
+
+This roughly generates old-style CLEO source like:
+
+```text
+thread 'SCRIPT'
+
+:loop
+WAIT_TIME_INT 0
+PRINT_HELP "HELLO"
+GOTO_@LABEL @loop
+```
+
+### Locals, globals, and labels
+
+The bridge uses short helper functions for CLEO operand types.
+
+```lua
+V(0)        -- local variable 0@ 
+V(12)       -- local variable 12@
+
+G(500)      -- global variable $500
+
+L("loop")   -- label reference @loop
+label("loop") -- label definition :loop
+```
+
+Most of the time you will not need `L("name")` directly, because helpers like `jmp()`, `gosub()`, and `goto_false()` accept a plain label name.
+
+```lua
+jmp("loop")
+gosub("get_position")
+goto_false("s8")
+```
+
+### Calling normal opcodes
+
+Opcode names from the loaded dictionary can be called directly when they are valid Lua-style names.
+
+```lua
+GET_PLAYER_CHAR(V(0), V(1))
+PRINT_HELP("TSAVE")
+PRINT_WITH_NUMBER("ONEX", V(6), 1000, 0)
+SET_PLAYER_CONTROL(V(0), 1)
+```
+
+The editor autocomplete is built from the loaded opcode dictionary. When you select an opcode, it inserts a call with placeholder arguments based on the opcode’s known parameter count.
+
+Example:
+
+```lua
+GET_PLAYER_CHAR(arg1, arg2)
+```
+
+You then replace the placeholders with real values:
+
+```lua
+GET_PLAYER_CHAR(V(0), V(1))
+```
+
+### Raw opcode escape
+
+Some opcode names contain characters that are awkward or illegal in normal Lua function names, such as `@`, `>`, `=`, or `-`.
+
+For those, use the raw opcode escape.
+
+Depending on the current bridge build, the raw escape may be exposed as:
+
+```lua
+OP("GOTO_IF_FALSE_@LABEL", L("s8"))
+```
+
+or the shorter editor shorthand:
+
+```lua
+$("GOTO_IF_FALSE_@LABEL", L("s8"))
+```
+
+Both mean: “emit this exact opcode name from the dictionary with these arguments.”
+
+Examples:
+
+```lua
+OP("GOTO_@LABEL", L("loop"))
+OP("GOTO_IF_FALSE_@LABEL", L("s8"))
+OP("LOCAL_VAR_INT_>_LITERAL_INT", V(2), 0)
+OP("LOCAL_VAR_INT_-=_LITERAL_INT", V(2), 1)
+```
+
+If your build supports the `$()` shorthand:
+
+```lua
+$("GOTO_@LABEL", L("loop"))
+$("GOTO_IF_FALSE_@LABEL", L("s8"))
+$("LOCAL_VAR_INT_>_LITERAL_INT", V(2), 0)
+$("LOCAL_VAR_INT_-=_LITERAL_INT", V(2), 1)
+```
+
+The raw escape is the “get out of my way” tool. If autocomplete knows the opcode but Lua cannot call it directly as a function, use the raw escape.
+
+### Sugar helpers
+
+The bridge also provides small helper names for common patterns. These are shown in the editor’s helper/sugar panel.
+
+Common helpers:
+
+```lua
+thread("SCRIPT")        -- thread name
+label("loop")           -- define :loop
+wait(0)                 -- WAIT_TIME_INT 0
+
+jmp("loop")             -- GOTO_@LABEL @loop
+goto_false("s8")        -- GOTO_IF_FALSE_@LABEL @s8
+gosub("get_position")   -- GOSUB_@LABEL @get_position
+ret()                   -- RETURN
+
+V(2)                    -- 2@
+G(500)                  -- $500
+L("loop")               -- @loop
+```
+
+Common arithmetic / comparison helpers:
+
+```lua
+seti(V(2), 300)         -- local int = literal int
+dec(V(2), 1)            -- local int -= literal int
+gt(V(2), 0)             -- local int > literal int
+int_from_float(V(6), V(3))
+```
+
+These helpers are just friendlier names for known CLEO opcode patterns. They do not add magic to the game; they only generate normal compiler input.
+
+### IF blocks and conditional jumps
+
+CLEO-style condition flow is still explicit. A common pattern is:
+
+```lua
+IF(1)
+IS_BUTTON_PRESSED(0, 4)
+goto_false("not_pressed")
+
+PRINT_HELP("PRESSED")
+
+label("not_pressed")
+```
+
+For button combos, you can chain checks:
+
+```lua
+IF(1)
+IS_BUTTON_PRESSED(0, 4)      -- L
+goto_false("skip_save")
+
+IF(1)
+IS_BUTTON_PRESSED(0, 10)     -- Left
+goto_false("skip_save")
+
+PRINT_HELP("TSAVE")
+gosub("get_position")
+
+label("skip_save")
+```
+
+This keeps the generated CLEO close to what you would have written by hand, but removes most of the label/opcode typing pain.
+
+### Example: save and restore position
+
+```lua
+thread("SCRIPT")
+
+label("loop")
+wait(0)
+
+-- cooldown gate
+IF(1)
+gt(V(2), 0)
+goto_false("check_keys")
+
+dec(V(2), 1)
+jmp("loop")
+
+label("check_keys")
+
+-- L + Left: save position
+IF(1)
+IS_BUTTON_PRESSED(0, 4)
+goto_false("s8")
+
+IF(1)
+IS_BUTTON_PRESSED(0, 10)
+goto_false("s8")
+
+PRINT_HELP("TSAVE")
+seti(V(2), 300)
+gosub("get_position")
+
+label("s8")
+
+-- L + Right: return to saved position
+IF(1)
+IS_BUTTON_PRESSED(0, 4)
+goto_false("s9")
+
+IF(1)
+IS_BUTTON_PRESSED(0, 11)
+goto_false("s9")
+
+PRINT_HELP("TLOAD")
+seti(V(2), 300)
+gosub("teleport_to")
+
+label("s9")
+
+jmp("loop")
+```
+
+### Strings and numbers
+
+Use normal Lua strings:
+
+```lua
+PRINT_HELP("TSAVE")
+PRINT_WITH_NUMBER("ONEX", V(6), 1000, 0)
+```
+
+Use normal numeric literals:
+
+```lua
+0
+1
+300
+1000
+0.0
+-25.5
+```
+
+The compiler decides how each operand is encoded in bytecode.
+
+Practical note: many CLEO text-display opcodes expect short ASCII strings. Keep HUD/help labels short unless you know the target opcode supports longer text.
+
+### Comments
+
+Lua comments use `--`.
+
+```lua
+-- This is a Lua comment
+PRINT_HELP("HELLO")
+```
+
+Block comments use:
+
+```lua
+--[[
+This is a longer comment.
+It can span multiple lines.
+]]
+```
+
+Old CLEO comments using `;` are for generated CLEO text, not Lua source.
+
+### Generated source
+
+The Lua bridge writes an intermediate generated text file before compiling.
+
+Example:
+
+```text
+examples/teleport_example.lua
+→ examples/teleport_example.generated.txt
+→ examples/teleport_example.csi
+```
+
+If something compiles strangely, inspect the `.generated.txt` file. It shows the old-style CLEO source that Lua produced.
+
+### Common gotchas
+
+#### “Unknown uppercase call”
+
+The editor’s name checker treats uppercase calls as possible opcode calls. If you see:
+
+```text
+Unknown uppercase call: SOMETHING
+```
+
+then either:
+
+1. the opcode dictionary does not contain that name,
+2. the opcode was mistyped,
+3. the helper should be lowercase,
+4. or the call should use the raw opcode escape.
+
+#### Lua syntax errors
+
+The red gutter marker comes from Ace’s Lua syntax checker. This means the Lua file itself is malformed before the CLEO compiler even gets involved.
+
+Common causes:
+
+```lua
+PRINT_HELP("HELLO"   -- missing closing parenthesis
+label(loop)          -- loop should be quoted: "loop"
+```
+
+Correct:
+
+```lua
+PRINT_HELP("HELLO")
+label("loop")
+```
+
+#### Opcode names with symbols
+
+This will not work as a normal Lua function call:
+
+```lua
+GOTO_IF_FALSE_@LABEL(L("s8"))
+```
+
+Use the raw escape:
+
+```lua
+OP("GOTO_IF_FALSE_@LABEL", L("s8"))
+```
+
+or, if enabled:
+
+```lua
+$("GOTO_IF_FALSE_@LABEL", L("s8"))
+```
+
+#### Autocomplete placeholders are not real code
+
+Autocomplete may insert:
+
+```lua
+GET_PLAYER_CHAR(arg1, arg2)
+```
+
+Replace `arg1`, `arg2`, etc. with real operands:
+
+```lua
+GET_PLAYER_CHAR(V(0), V(1))
+```
+
+### Suggested workflow
+
+1. Load an opcode dictionary.
+2. Start from an example script.
+3. Use autocomplete to discover opcodes.
+4. Prefer sugar helpers for labels, locals, jumps, and common operations.
+5. Use `OP("...")` or `$("...")` for ugly opcode names.
+6. Run **Check Names**.
+7. Save the `.lua`.
+8. Compile with the Python compiler.
+9. If needed, inspect the generated CLEO text file.
+
+### Further reading
+
+Lua syntax and language reference:
+
+* [Lua Reference Manuals](https://www.lua.org/manual/)
+* [Lua 5.4 Reference Manual](https://www.lua.org/manual/5.4/)
+* [Programming in Lua, first edition online](https://www.lua.org/pil/contents.html)
+
+For this project, you usually only need basic Lua function calls, strings, numbers, comments, and simple helper functions. The CLEO opcode dictionary remains the real vocabulary for game behavior.
+
+
+
+
+
+
+## Security posture
 
 This is a local desktop WebKit app with local filesystem/compiler capabilities. Treat the Flask backend as a private app backend for the bundled UI, not as a general-purpose web service.
 
@@ -119,16 +530,3 @@ Before release, run the asset audit script and, with the wrapper running, the se
 ./tools/security_smoke.sh
 ```
 
-## Saving files
-
-Inside the GTK/WebKit wrapper, **Save .lua** and **Export Project** write to:
-
-```text
-exports/
-```
-
-This is intentional. WebKitGTK may not show a normal browser "Save As" dialog for
-Blob downloads unless native download handling is wired into the wrapper, so the
-app uses a small Flask `/api/save_text` route and writes to a predictable local
-folder. If you open `index.html` directly as a static development preview,
-the backend token is unavailable and save actions fall back to browser Blob download behavior.
